@@ -635,6 +635,7 @@ select:focus{border-color:var(--accent)}
       <div class="chip" data-deck="weak">苦手・★</div>
       <div class="chip" data-deck="new">未学習</div>
       <select id="deckCat"><option value="">全カテゴリ</option></select>
+      <select id="deckChecker" class="hidden" title="チェッカー"><option value="">全チェッカー</option></select>
       <div class="spacer"></div>
       <button class="cta ghost sm" id="shuffleBtn"><svg class="ic" viewBox="0 0 24 24"><path d="M16 4h4v4"/><path d="M20 4 4 20"/><path d="M16 20h4v-4"/><path d="m14.5 14.5 5.5 5.5"/><path d="M4 4l5.5 5.5"/></svg>シャッフル</button>
     </div>
@@ -804,7 +805,8 @@ const CATMETA={
  '機長の権限':{c:'#e0c878',i:'shield'},'安全阻害行為':{c:'#ec8aa2',i:'shieldAlert'},
  '緊急対策':{c:'#ff8a6a',i:'alert'},'機内火災':{c:'#ff7a5a',i:'flame'},
  '人間の能力':{c:'#9c8ae0',i:'person'},'アルコール薬物':{c:'#8ad0c0',i:'cup'},'その他':{c:'#9db0bd',i:'dots'},
- '気象・旅客':{c:'#6fb1ff',i:'cloud'},'人間の能力・アルコール':{c:'#9c8ae0',i:'person'},'追加':{c:'#9db0bd',i:'dots'}
+ '気象・旅客':{c:'#6fb1ff',i:'cloud'},'人間の能力・アルコール':{c:'#9c8ae0',i:'person'},'追加':{c:'#9db0bd',i:'dots'},
+ '機長認定について':{c:'#e0c878',i:'shield'},'機長の義務と権限':{c:'#c98a8a',i:'book'},'保安関連':{c:'#ec8aa2',i:'shieldAlert'},'飛行場':{c:'#5b9dff',i:'plane'},'路線等':{c:'#6fe0c0',i:'route'},'最近の事例':{c:'#9c8ae0',i:'clipboard'}
 };
 function hashN(s){let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return h;}
 function catColor(c){return (CATMETA[c]&&CATMETA[c].c)||CATPAL[hashN(c)%CATPAL.length];}
@@ -815,13 +817,13 @@ function isFlagged(id){return !!prog(id).flag}
 function toggleFlag(id){const p=prog(id);p.flag=!p.flag;save();return p.flag}
 
 /* ===== category display / sort order ===== */
-const CAT_ORDER=['機長認定について','機長の義務と権限','緊急対策','保安関連','その他','最近の事例'];
+const CAT_ORDER=['機長認定について','機長の義務と権限','緊急対策','保安関連','飛行場','路線等','その他','最近の事例'];
 function catRank(c){const i=CAT_ORDER.indexOf(c);return i<0 ? CAT_ORDER.length-1.5 : i;} // 未掲載は「その他」の直前
 function sortCats(list){return [...new Set(list)].sort((a,b)=>catRank(a)-catRank(b) || a.localeCompare(b,'ja'));}
 /* ===== 下田さん口述目次(2026.FEB)準拠の文書順 =====
    目次の章順: 出発前確認(①〜④)→外部点検→航空法→気象・旅客→緊急対策→性能→システム→人間の能力・アルコール→追加。
    idの数値部分＝元資料の掲載順なので、章(ファイル)順×番号で目次どおりに並ぶ。 */
-const DOC_ORDER=['nintei','duty','emer','sec','misc','case'];
+const DOC_ORDER=['nintei','duty','emer','sec','apt','route','misc','case'];
 function docRank(q){
   const m=/^([a-z0-9]+)-e?(\d+)/.exec(q.id)||[];
   const si=DOC_ORDER.indexOf(m[1]);
@@ -1230,8 +1232,8 @@ function renderPace(s){
 let deck=[],di=0,flipped=false,currentDeckMode='all';
 function setChip(group,val){$$(`.chip[data-${group}]`).forEach(c=>c.classList.toggle('active',c.dataset[group]===val));}
 function buildDeck(){
-  const cat=$('#deckCat').value;
-  let list=QA.filter(q=>!cat||q.category===cat);
+  const cat=$('#deckCat').value;const ck=$('#deckChecker').value;
+  let list=QA.filter(q=>(!cat||q.category===cat)&&(!ck||q.checker===ck));
   if(currentDeckMode==='due')list=list.filter(q=>isDue(q.id));
   else if(currentDeckMode==='freq')return list.filter(q=>q.freq>=2).sort((a,b)=>b.freq-a.freq);
   else if(currentDeckMode==='weak')list=list.filter(q=>statusOf(q.id)==='learning'||isFlagged(q.id));
@@ -1330,6 +1332,7 @@ $('#rateBar').querySelectorAll('button').forEach(b=>b.onclick=()=>{
 });
 $$('.chip[data-deck]').forEach(c=>c.onclick=()=>{currentDeckMode=c.dataset.deck;setChip('deck',c.dataset.deck);startDeck();});
 $('#deckCat').onchange=startDeck;
+$('#deckChecker').onchange=startDeck;
 $('#shuffleBtn').onclick=()=>{for(let i=deck.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]];}di=0;renderCard();toast('シャッフルしました');};
 
 document.addEventListener('keydown',e=>{
@@ -1649,7 +1652,7 @@ function fillSelect(sel,list){
   if([...el.options].some(o=>o.value===cur))el.value=cur;else el.value='';
 }
 function repopulateCats(){fillSelect('#deckCat',cats);fillSelect('#browseCat',cats);}
-function fillCheckers(){const cs=META.checkers||[];const el=$('#checkerSel');el.innerHTML='<option value="">全チェッカー</option>'+cs.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');el.classList.toggle('hidden',!cs.length);}
+function fillCheckers(){const cs=META.checkers||[];['#checkerSel','#deckChecker'].forEach(sel=>{const el=$(sel);if(!el)return;const cur=el.value;el.innerHTML='<option value="">全チェッカー</option>'+cs.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');el.value=cur;el.classList.toggle('hidden',!cs.length);});}
 
 /* ============ SOURCE SWITCHER ============ */
 const SRC_LABEL={nintei:'路線審査 ORAL'};
