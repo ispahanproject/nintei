@@ -1,5 +1,5 @@
-const CACHE='nintei-v1';
-const CORE=['./','index.html','manifest.webmanifest','data/qa.enc','icon-192.png','icon-512.png','icon.png',
+const CACHE='nintei-v2';
+const CORE=['./','index.html','manifest.webmanifest','data/qa.enc.json','data/qa.enc.p00','data/qa.enc.p01','data/qa.enc.p02','data/qa.enc.p03','data/qa.enc.p04','data/qa.enc.p05','data/qa.enc.p06','data/qa.enc.p07','data/qa.enc.p08','data/qa.enc.p09','data/qa.enc.p10','data/qa.enc.p11','data/qa.enc.p12','data/qa.enc.p13','data/qa.enc.p14','data/qa.enc.p15','icon-192.png','icon-512.png','icon.png',
   'fonts/noto-sans-jp-japanese-400-normal.woff2','fonts/noto-sans-jp-japanese-500-normal.woff2','fonts/noto-sans-jp-japanese-700-normal.woff2',
   'fonts/noto-sans-jp-latin-400-normal.woff2','fonts/noto-sans-jp-latin-500-normal.woff2','fonts/noto-sans-jp-latin-700-normal.woff2'];
 self.addEventListener('install',e=>{
@@ -12,7 +12,7 @@ self.addEventListener('fetch',e=>{
   const u=new URL(e.request.url);
   if(e.request.method!=='GET'||u.origin!==location.origin)return;
   // アプリ本体(index)とデータ(qa.enc)は network-first: 更新が必ず届き、オフライン時のみキャッシュで動く
-  const isCore=e.request.mode==='navigate'||u.pathname.endsWith('/index.html')||u.pathname.endsWith('qa.enc');
+  const isCore=e.request.mode==='navigate'||u.pathname.endsWith('/index.html')||/qa\.enc(\.json|\.p\d+)?$/.test(u.pathname);
   if(isCore){
     e.respondWith(
       fetch(e.request).then(res=>{
