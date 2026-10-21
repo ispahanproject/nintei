@@ -1749,29 +1749,66 @@ if(!ALL.length){
 };
 </script>
 <script>
-/* ====== passphrase gate + AES-GCM decrypt (認定審査) ====== */
-const ENC_URL='data/qa.enc', CK='nintei_data_v1', CKF='nintei_fp_v1';
+/* ====== passphrase gate + AES-GCM decrypt (認定審査) ======
+   データ: data/manifest.json {v,files,size,sha256} と data/<v>/pNN.txt（結合すると base64 = salt16|iv12|暗号文|tag16）
+   ・版ごとにディレクトリが変わり中身は不変 → CDN / Service Worker のキャッシュで新旧が混ざらない
+   ・manifest は毎回キャッシュを回避して取得し、結合後に長さと SHA-256 を照合してから復号（不一致なら1回だけキャッシュ無しで取り直す）
+   ・端末保存は IndexedDB（localStorage は容量が小さく、データが大きいと保存に失敗する。旧版の localStorage 保存は読み込み時に移行） */
+const MAN_URL='data/manifest.json', CK='nintei_data_v1', CKF='nintei_fp_v1';
 function b64ToBuf(b){const s=atob(b);const u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
 async function deriveKey(pass,salt){const e=new TextEncoder();const km=await crypto.subtle.importKey('raw',e.encode(pass),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:150000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);}
-const fpOf=b64=>b64.length+':'+b64.slice(0,40);
-async function fetchEnc(){const r=await fetch(ENC_URL+'.json',{cache:'no-store'});if(r.ok){const m=await r.json();const ps=await Promise.all(Array.from({length:m.parts},(_,i)=>fetch(ENC_URL+'.p'+String(i).padStart(2,'0'),{cache:'no-store'}).then(x=>{if(!x.ok)throw new Error('part');return x.text();})));const b64=ps.join('').trim();if(m.size&&b64.length!==m.size)throw new Error('size');return b64;}const b64=(await (await fetch(ENC_URL,{cache:'no-store'})).text()).trim();return b64;}
-async function fetchFp(){try{const r=await fetch(ENC_URL+'.json',{cache:'no-store'});if(r.ok){const m=await r.json();if(m.fp)return m.fp;}}catch(e){}return fpOf(await fetchEnc());}
+async function sha256hex(s){const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return Array.from(new Uint8Array(h),x=>x.toString(16).padStart(2,'0')).join('');}
+function gErr(name,msg){const e=new Error(msg||name);e.name=name;return e;}
+async function fetchManifest(){
+  let r;try{r=await fetch(MAN_URL+'?t='+Date.now(),{cache:'no-store'});}catch(e){throw gErr('NetworkError','manifest');}
+  if(!r.ok)throw gErr('NetworkError','manifest '+r.status);
+  return r.json();
+}
+/* 解錠できた版以外のデータ分割をキャッシュから消す（端末の容量を食わないように） */
+async function pruneOld(v){try{for(const n of await caches.keys()){const c=await caches.open(n);for(const r of await c.keys()){const p=new URL(r.url).pathname;if(/\/data\/[0-9a-f]{12}\//.test(p)&&p.indexOf('/'+v+'/')<0)await c.delete(r);}}}catch(e){}}
+async function fetchEnc(){
+  const m=await fetchManifest();let last=null;
+  for(let i=0;i<2;i++){ // 2回目はキャッシュを使わずに取り直す
+    try{
+      const ps=await Promise.all(m.files.map(f=>fetch('data/'+m.v+'/'+f+(i?'?r='+Date.now():''),i?{cache:'no-store'}:{}).then(x=>{if(!x.ok)throw gErr('NetworkError',f+' '+x.status);return x.text();})));
+      const b64=ps.join('').trim();
+      if(b64.length===m.size&&await sha256hex(b64)===m.sha256){pruneOld(m.v);return {b64,v:m.v};}
+      last=gErr('DataError','照合 '+b64.length+'/'+m.size);
+    }catch(e){last=(e&&e.name==='NetworkError')?e:gErr('NetworkError',String((e&&e.message)||e));}
+  }
+  throw last;
+}
 async function decryptData(pass){
-  let b64; try{b64=await fetchEnc();}catch(e){const err=new Error('network');err.name='NetworkError';throw err;}
+  const {b64,v}=await fetchEnc();
   const d=b64ToBuf(b64);const salt=d.slice(0,16),iv=d.slice(16,28),ct=d.slice(28);
   const key=await deriveKey(pass,salt);
-  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct); // 失敗時は OperationError
-  try{localStorage.setItem(CKF,fpOf(b64));}catch(e){}
-  return new TextDecoder().decode(pt);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct); // データは照合済みなので、失敗(OperationError)＝パスワード違い
+  return {json:new TextDecoder().decode(pt),v};
 }
+/* 端末保存: IndexedDB（使えなければ localStorage） */
+function gDB(){return new Promise((res,rej)=>{const r=indexedDB.open('nintei',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+function gKV(mode,fn){return gDB().then(db=>new Promise((res,rej)=>{const tx=db.transaction('kv',mode);const rq=fn(tx.objectStore('kv'));tx.oncomplete=()=>{db.close();res(rq.result);};tx.onerror=tx.onabort=()=>{db.close();rej(tx.error);};}));}
+async function loadSaved(){
+  try{const v=await gKV('readonly',s=>s.get(CK));if(v)return v;}catch(e){}
+  let ls=null;try{ls=localStorage.getItem(CK);}catch(e){}
+  if(ls){try{await gKV('readwrite',s=>s.put(ls,CK));localStorage.removeItem(CK);}catch(e){}} // 旧版の localStorage 保存を IndexedDB へ移行
+  return ls;
+}
+async function saveData(json,v){
+  let ok=false;
+  try{await gKV('readwrite',s=>s.put(json,CK));ok=true;}catch(e){try{localStorage.setItem(CK,json);ok=true;}catch(_){}}
+  try{if(ok)localStorage.setItem(CKF,v);}catch(e){}
+  return ok;
+}
+async function clearSaved(){try{await gKV('readwrite',s=>s.delete(CK));}catch(e){}try{localStorage.removeItem(CK);localStorage.removeItem(CKF);}catch(e){}}
 function boot(json){const o=JSON.parse(json);window.ATPL_QA=o.qa;window.ATPL_META=o.meta;window.ATPL_COMMON=o.common||[];const g=document.getElementById('gate');if(g)g.remove();window.__startApp();}
-/* 保存済みデータ利用時: 裏でqa.encの指紋を照合し、更新されていたら再解錠を促す */
+/* 保存済みデータで起動した時: 裏で manifest の版を照合し、更新されていたら再解錠を促す */
 async function checkDataUpdate(){
   try{
-    const fp=await fetchFp();
-    const old=localStorage.getItem(CKF);
-    if(old!==fp){ // 指紋なし(旧版からの移行)も「更新あり」として一度だけ再解錠を促す
-      localStorage.removeItem(CK);
+    const m=await fetchManifest();
+    let old=null;try{old=localStorage.getItem(CKF);}catch(e){}
+    if(old!==m.v){ // 版が違う（旧版から移行した保存データも含む）→ 保存を消して一度だけ再解錠を促す
+      await clearSaved();
       const d=document.createElement('div');
       d.textContent='新しいデータがあります。タップで更新（パスワード再入力）';
       d.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:600;max-width:92%;background:#0f3f39;color:#d9fff4;border:1px solid #2bb6a6;padding:12px 18px;border-radius:13px;font-size:13px;font-weight:700;box-shadow:0 10px 32px rgba(0,0,0,.45);cursor:pointer';
@@ -1788,14 +1825,19 @@ async function tryUnlock(){
   if(btn.disabled)return;
   if(!pass){err.textContent='パスワードを入力してください';return;}
   btn.disabled=true; btn.textContent='解錠中…'; err.textContent='';
-  try{const json=await decryptData(pass); if(remember){try{localStorage.setItem(CK,json);}catch(e){}} boot(json);}
+  let r;
+  try{r=await decryptData(pass);}
   catch(e){
-    err.textContent = e&&e.name==='OperationError'
-      ? 'パスワードが違います'
-      : 'データを取得できませんでした。電波のある場所で再試行してください';
+    const n=e&&e.name, why=(e&&e.message)?'（'+e.message+'）':'';
+    err.textContent = n==='OperationError' ? 'パスワードが違います'
+      : n==='DataError' ? 'データを更新中です。1〜2分おいて再試行してください'+why
+      : 'データを取得できませんでした。電波のある場所で再試行してください'+why;
     btn.disabled=false; btn.textContent='解錠';
     const inp=document.getElementById('gatePass'); inp.select(); inp.focus();
+    return;
   }
+  if(remember)await saveData(r.json,r.v);
+  boot(r.json);
 }
 function showGate(){
   const d=document.createElement('div'); d.id='gate';
@@ -1821,8 +1863,8 @@ function showGate(){
 }
 (async()=>{
   if('serviceWorker' in navigator){try{await navigator.serviceWorker.register('sw.js');}catch(e){}}
-  let cached=null; try{cached=localStorage.getItem(CK);}catch(e){}
-  if(cached){try{boot(cached);checkDataUpdate();return;}catch(e){try{localStorage.removeItem(CK);}catch(_){}}}
+  const cached=await loadSaved();
+  if(cached){try{boot(cached);checkDataUpdate();return;}catch(e){await clearSaved();}}
   showGate();
 })();
 </script>
