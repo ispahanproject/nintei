@@ -236,6 +236,7 @@ a{color:var(--accent)}
 .lapsel i{font-style:normal;font-size:11.5px;font-weight:700;color:var(--ink-dim);padding:4px 9px;border-radius:8px;cursor:pointer;transition:.14s}
 .lapsel i:hover{color:var(--ink)}
 .lapsel i.on{color:var(--accent-ink);background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+.prog-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.prog-line .lapsel{margin-left:0}
 
 /* ---------- 学習カレンダー ---------- */
 .cal{padding:18px 20px;margin-bottom:18px}
@@ -586,14 +587,14 @@ select:focus{border-color:var(--accent)}
   <section id="view-home">
     <div class="grid home-top">
       <div class="panel hero">
-        <div class="ring" id="ring"><div class="val"><b id="ringPct">0%</b><span>習得率</span></div></div>
+        <div class="ring" id="ring"><div class="val"><b id="ringPct">0%</b><span id="ringLbl">習得率</span></div></div>
         <div class="info">
           <h1 id="heroTitle"></h1>
           <p id="heroMsg">今日も一歩ずつ。口述本番は「即答」が命。</p>
           <div class="countdown unset" id="countdown"></div>
           <div id="verLine" style="margin-top:10px;font-size:11px;color:var(--ink-faint)"></div>
           <div class="statline">
-            <div class="stat"><b id="stTotal">0</b><span>総問題数</span></div>
+            <div class="stat"><b id="stTotal">0</b><span id="stTotalLbl">総問題数</span></div>
             <div class="stat"><b id="stNew">0</b><span>未着手</span></div>
             <div class="stat"><b id="stLearning" style="color:var(--warn)">0</b><span>勉強済</span></div>
             <div class="stat"><b id="stMastered" style="color:var(--good)">0</b><span>習得済み</span></div>
@@ -618,7 +619,7 @@ select:focus{border-color:var(--accent)}
 
     <div class="panel cal" id="calPanel"></div>
 
-    <div class="sec-title">カテゴリ別の進捗</div>
+    <div class="sec-title" id="catSecTitle">カテゴリ別の進捗</div>
     <div class="grid cols-3" id="catGrid"></div>
 
     <div class="sec-title">本番で出た回数（頻出 TOP）</div>
@@ -841,7 +842,7 @@ const BYID = Object.fromEntries(ALL.map(q=>[q.id,q]));
 const META = window.ATPL_META||{title:'ATPL口述'};
 const LS='nintei_oral_v1';
 let SRC='nintei';            // 'shimoda' | 'sakoda' | 'common'
-let QA=[];                    // 現在のソース＋出題範囲に絞ったリスト
+let QA=[];let TQ=[];   /* TQ=習得率・進捗の集計対象 */                    // 現在のソース＋出題範囲に絞ったリスト
 let lastTab='home';          // 共通から戻った時に表示するタブ
 /* 出題範囲: main=下田さん口述目次に載っている主要設問のみ / sub=資料中の派生の問いも含む / all=参考資料も含む */
 const SCOPE_LABEL={main:'主要設問',sub:'派生の問いも含む',all:'参考資料も含む'};
@@ -855,7 +856,15 @@ function inScope(q){
 function rebuildForSource(){
   QA = ALL.filter(q=>q.source===SRC && inScope(q));
   cats=sortCats(QA.map(q=>q.category));
+  const t=progTarget(); TQ = t ? QA.filter(q=>q.checker===t) : QA;
 }
+function progTarget(){const cs=META.checkers||[];let m={};try{m=store._meta||{};}catch(e){}
+  if(m.progChecker!==undefined&&(m.progChecker===''||cs.includes(m.progChecker)))return m.progChecker;
+  return cs[0]||'';}
+function progSelHTML(){const cs=META.checkers||[];if(!cs.length)return '';const t=progTarget();
+  return `<span class="lapsel progsel">${cs.map(c=>`<i class="${t===c?'on':''}" data-t="${esc(c)}">${esc(c)} ${QA.filter(q=>q.checker===c).length}問</i>`).join('')}<i class="${t===''?'on':''}" data-t="">全問題 ${QA.length}問</i></span>`;}
+function bindProgSel(){$$('#pacePanel .progsel i').forEach(b=>b.onclick=e=>{e.stopPropagation();store._meta.progChecker=b.dataset.t;save();rebuildForSource();renderHome();
+  toast(`習得率の対象: ${b.dataset.t?b.dataset.t+'チェッカーの問題':'全問題'}`);});}
 let store = load();
 function load(){try{return JSON.parse(localStorage.getItem(LS))||{}}catch(e){return {}} }
 function save(){localStorage.setItem(LS,JSON.stringify(store))}
@@ -1003,8 +1012,8 @@ function grade(id,q){
 /* ============ STATS ============ */
 function stats(){
   let m=0,l=0,n=0,due=0;
-  QA.forEach(q=>{const s=statusOf(q.id);if(s==='mastered')m++;else if(s==='learning')l++;else n++;if(isDue(q.id))due++;});
-  return {total:QA.length,mastered:m,learning:l,new:n,due,pct:QA.length?Math.round(m/QA.length*100):0};
+  TQ.forEach(q=>{const s=statusOf(q.id);if(s==='mastered')m++;else if(s==='learning')l++;else n++;if(isDue(q.id))due++;});
+  return {total:TQ.length,mastered:m,learning:l,new:n,due,pct:TQ.length?Math.round(m/TQ.length*100):0};
 }
 
 /* ============ ROUTER ============ */
@@ -1029,6 +1038,7 @@ function renderHome(){
   $('#ringPct').textContent=s.pct+'%';
   $('#ring').style.setProperty('--p',s.pct);
   $('#stTotal').textContent=s.total;$('#stMastered').textContent=s.mastered;
+  {const t=progTarget();$('#ringLbl').textContent=t?t+'の習得率':'習得率';$('#stTotalLbl').textContent=t?t+'の問題':'総問題数';$('#catSecTitle').textContent=t?`カテゴリ別の進捗（${t}の問題）`:'カテゴリ別の進捗';}
   $('#stNew').textContent=s.new;
   $('#stLearning').textContent=s.learning;$('#stDue').textContent=s.due;
   $('#streakN').textContent=studyStats().streak;   // 実際に学習した日の連続数
@@ -1038,8 +1048,8 @@ function renderHome(){
   $('#heroMsg').textContent = s.due>0 ? `復習が ${s.due} 問たまっています。サッと回そう。` : msgs[s.mastered%msgs.length];
 
   const cg=$('#catGrid');cg.innerHTML='';
-  cats.forEach(c=>{
-    const list=QA.filter(q=>q.category===c);
+  sortCats(TQ.map(q=>q.category)).forEach(c=>{
+    const list=TQ.filter(q=>q.category===c);
     const m=list.filter(q=>statusOf(q.id)==='mastered').length;
     const l=list.filter(q=>statusOf(q.id)==='learning').length;
     const rest=list.length-m-l;
@@ -1050,7 +1060,7 @@ function renderHome(){
     el.innerHTML=`<div class="cat-ico">${ic(catIcon(c))}</div><div class="pct">${pct}%</div><h3>${esc(c)}</h3>
       <div class="meta"><b class="rest">未着手 ${rest}</b> ・ 勉強済 ${l} ・ 習得 ${m} / ${list.length}問</div>
       <div class="bar"><i style="width:${pct}%"></i><i class="lrn" style="width:${pctL}%"></i></div>`;
-    el.onclick=()=>{$('#deckCat').value=c;currentDeckMode='all';setChip('deck','all');show('cards');};
+    el.onclick=()=>{$('#deckCat').value=c;$('#deckChecker').value=progTarget();currentDeckMode='all';setChip('deck','all');deck=[];show('cards');};
     cg.appendChild(el);
   });
 
@@ -1069,8 +1079,8 @@ function renderHome(){
   });
   updateDueUI();
 }
-$('#goReview').onclick=()=>{currentDeckMode='due';$('#deckCat').value='';setChip('deck','due');show('cards');};
-$('#goFreq').onclick=()=>{currentDeckMode='freq';$('#deckCat').value='';setChip('deck','freq');show('cards');};
+$('#goReview').onclick=()=>{currentDeckMode='due';$('#deckCat').value='';$('#deckChecker').value=progTarget();setChip('deck','due');deck=[];show('cards');};
+$('#goFreq').onclick=()=>{currentDeckMode='freq';$('#deckCat').value='';$('#deckChecker').value=progTarget();setChip('deck','freq');deck=[];show('cards');};
 
 /* ============ 学習カレンダー ============ */
 let calYM=null;   // {y,m} 表示中の年月（null=今月）
@@ -1149,8 +1159,8 @@ function lapsGoal(){return store._meta.laps||3;}
 function lapStats(){
   const laps=lapsGoal();
   let remain=0;
-  QA.forEach(q=>{remain+=Math.max(0,laps-repsOf(q.id));});
-  return {laps,remain,total:laps*QA.length};
+  TQ.forEach(q=>{remain+=Math.max(0,laps-repsOf(q.id));});
+  return {laps,remain,total:laps*TQ.length};
 }
 function lapSelHTML(){
   const cur=lapsGoal();
@@ -1165,14 +1175,14 @@ function bindLapSel(){
 }
 /* 巡ごとの完了率（1巡＝一度でも処理した／2巡・3巡＝チェック済み） */
 function lapProgress(){
-  const tot=QA.length||1;
-  const d1=QA.filter(q=>statusOf(q.id)!=='new').length;
-  const d2=QA.filter(q=>lapDone(q.id,2)).length;
-  const d3=QA.filter(q=>lapDone(q.id,3)).length;
-  const d4=QA.filter(q=>lapDone(q.id,4)).length;
+  const tot=TQ.length||1;
+  const d1=TQ.filter(q=>statusOf(q.id)!=='new').length;
+  const d2=TQ.filter(q=>lapDone(q.id,2)).length;
+  const d3=TQ.filter(q=>lapDone(q.id,3)).length;
+  const d4=TQ.filter(q=>lapDone(q.id,4)).length;
   const laps=(d4||lapsGoal()>=4)?[1,2,3,4]:[1,2,3];   // 4巡は使い始めたら表示
   return laps.map((n,i)=>{const done=[d1,d2,d3,d4][i];
-    return {n,done,total:QA.length,pct:Math.round(done/tot*100)};});
+    return {n,done,total:TQ.length,pct:Math.round(done/tot*100)};});
 }
 function lapProgHTML(){
   return `<div class="lapprog">${lapProgress().map(p=>
@@ -1195,12 +1205,13 @@ function renderPace(s){
   const iso=store._meta.examDate;
   if(!iso){
     el.innerHTML=`<div class="pace-head">${ic('gauge')}<b>審査までのペース</b>${lapSelHTML()}</div>
+      <div class="pace-sub prog-line">習得率の集計 ${progSelHTML()}</div>
       <div class="pace-sub">審査日を設定すると、残り日数と「1日あたり何問で間に合うか」を表示します。</div>
       ${burnHTML(s)}
-      <div class="btnrow"><button class="cta sm" id="paceSet">8/27 に設定</button><button class="cta ghost sm" id="paceSet2">別の日を選ぶ</button></div>`;
+      <div class="btnrow"><button class="cta sm" id="paceSet">審査日を設定</button><button class="cta ghost sm" id="paceSet2">別の日を選ぶ</button></div>`;
     $('#paceSet').onclick=()=>$('#countdown').click();
     $('#paceSet2').onclick=()=>$('#countdown').click();
-    bindLapSel();
+    bindLapSel();bindProgSel();
     return;
   }
   const ex=new Date(iso+'T00:00:00');const today=new Date();today.setHours(0,0,0,0);
@@ -1217,7 +1228,7 @@ function renderPace(s){
   const goal=store._meta.goal||20;
   const goalOk=goal>=pL;
   el.innerHTML=`<div class="pace-head">${ic('gauge')}<b>${dl} 審査まで <span class="pace-days">${days}</span> 日</b>${lapSelHTML()}</div>
-    <div class="pace-sub">対象：${SCOPE_LABEL[scopeOf()]} <b>${QA.length}</b>問（一覧タブで範囲を変更できます）</div>
+    <div class="pace-sub prog-line">習得率の集計 ${progSelHTML()}</div>
     ${burnHTML(s)}
     <div class="pace-grid">
       <div class="pace-cell ${untouched===0?'ok':''}"><b>${untouched}</b><span>未着手</span><small>1日 ${p1} 問で一巡</small></div>
@@ -1225,7 +1236,7 @@ function renderPace(s){
       <div class="pace-cell tap ${goalOk?'ok':'warn'}" id="paceGoal"><b>${goal}</b><span>今の目標 / 日</span><small>${goalOk?`${L.laps}巡ペース OK`:`${L.laps}巡まで あと ${pL-goal} 問/日`}</small></div>
     </div>`;
   $('#paceGoal').onclick=()=>$('#goalEdit').click();
-  bindLapSel();
+  bindLapSel();bindProgSel();
 }
 
 /* ============ FLASHCARDS ============ */
@@ -1325,7 +1336,7 @@ $('#rateBar').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   else di++;
   renderCard();updateDueUI();
   const gi=goalInfo();
-  if(nowMastered){const rem=QA.filter(x=>statusOf(x.id)!=='mastered').length;toast(`習得！ ノルマ残り ${rem} 問`);}
+  if(nowMastered){const rem=TQ.filter(x=>statusOf(x.id)!=='mastered').length;toast(`習得！ ノルマ残り ${rem} 問`);}
   else if(gi.done && gi.count===gi.goal)toast('今日の目標を達成！');
   else if(g===0)toast('少し後でもう一度出ます');
   else if(g>=2)toast(g===3?'完璧':'よし');
@@ -1558,7 +1569,7 @@ function renderBrowse(){
       updateBrowseCountLine();updateDueUI();
       if(on){
         bumpToday();renderToday();          // 一覧で処理した分も「今日の目標」に計上
-        const rem=QA.filter(x=>statusOf(x.id)!=='mastered').length;
+        const rem=TQ.filter(x=>statusOf(x.id)!=='mastered').length;
         const gi=goalInfo();
         toast(gi.done&&gi.count===gi.goal ? '今日の目標を達成！'
              : `習得！ ノルマ残り ${rem} 問（今日 ${gi.count}/${gi.goal}）`);
@@ -1626,7 +1637,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#modal').classLis
 /* ============ DUE BADGES（復習件数の露出） ============ */
 function updateDueUI(){
   if(SRC==='common')return;
-  const d=QA.filter(q=>isDue(q.id)).length;
+  const d=TQ.filter(q=>isDue(q.id)).length;
   const dn=$('#dueN'); if(dn)dn.textContent=d?` (${d})`:'';
   const chip=$('.chip[data-deck="due"]'); if(chip)chip.textContent=d?`復習 ${d}`:'復習';
   const tab=$('.tab[data-view="cards"]');
