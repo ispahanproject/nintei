@@ -691,7 +691,8 @@ select:focus{border-color:var(--accent)}
         <option value="all">＋参考資料</option>
       </select>
       <select id="sortSel" title="並び順">
-        <option value="doc">資料順</option>
+        <option value="doc">出題順 → 資料順</option>
+        <option value="docraw">資料順</option>
         <option value="state">状態順（未着手→勉強済→習得）</option>
         <option value="studied">勉強済を先頭</option>
       </select>
@@ -832,6 +833,10 @@ function docRank(q){
   const si=DOC_ORDER.indexOf(m[1]);
   return (si<0?99:si)*10000+(q.sort!=null?q.sort/100:(+m[2]||0));
 }
+function orderChecker(){return progTarget()||(META.checkers||[])[0]||'';}
+function orderRank(q){const c=orderChecker();return (c&&q.checker===c)?-1e6+(q.korder!=null?q.korder:docRank(q)/100):docRank(q);}
+function fillSortLabels(){const oc=orderChecker();const so=document.querySelector('#sortSel option[value="doc"]');if(so)so.textContent=oc?`${oc}の出題順 → 資料順`:'資料順';
+  const sr=document.querySelector('#sortSel option[value="docraw"]');if(sr){sr.textContent=oc?`資料順（真鍋の問題の直後に${oc}）`:'資料順';sr.hidden=!oc;}}
 const KIND_LABEL={sub:'派生の問い',ref:'参考資料'};
 function chk(q){return q.checker?`<span class="badge checker">${ic('person')}${esc(q.checker)}${q.date?' '+esc(q.date):''}</span>`:'';}
 
@@ -1251,7 +1256,7 @@ function buildDeck(){
   else if(currentDeckMode==='freq')return list.filter(q=>q.freq>=2).sort((a,b)=>b.freq-a.freq);
   else if(currentDeckMode==='weak')list=list.filter(q=>statusOf(q.id)==='learning'||isFlagged(q.id));
   else if(currentDeckMode==='new')list=list.filter(q=>statusOf(q.id)==='new');
-  return list.sort((a,b)=>docRank(a)-docRank(b)); // 頻出以外は目次の掲載順
+  return list.sort((a,b)=>orderRank(a)-orderRank(b)); // 頻出以外は チェッカーの出題順 → 資料順
 }
 function startDeck(){deck=buildDeck();di=0;flipped=false;renderCard();}
 function renderCard(){
@@ -1389,9 +1394,10 @@ function sortMode(){return store._meta.sort||'doc';}
 function stateRank(id){const s=statusOf(id);return s==='new'?0:s==='learning'?1:2;}
 function applySort(list){
   const m=sortMode();
-  if(m==='state')   return list.sort((a,b)=>stateRank(a.id)-stateRank(b.id)||docRank(a)-docRank(b));
-  if(m==='studied') return list.sort((a,b)=>(statusOf(b.id)==='learning')-(statusOf(a.id)==='learning')||docRank(a)-docRank(b));
-  return list.sort((a,b)=>docRank(a)-docRank(b));   // 目次順
+  if(m==='state')   return list.sort((a,b)=>stateRank(a.id)-stateRank(b.id)||orderRank(a)-orderRank(b));
+  if(m==='studied') return list.sort((a,b)=>(statusOf(b.id)==='learning')-(statusOf(a.id)==='learning')||orderRank(a)-orderRank(b));
+  if(m==='docraw')  return list.sort((a,b)=>docRank(a)-docRank(b));   // 資料順（真鍋の問題の直後にチェッカー別）
+  return list.sort((a,b)=>orderRank(a)-orderRank(b));   // 既定: チェッカーの出題順 → 資料順
 }
 function updClear(inp,btn){$(btn).classList.toggle('hidden',!$(inp).value);}
 const dRenderBrowse=debounce(renderBrowse,160);
@@ -1521,15 +1527,16 @@ function renderBrowse(){
   updateBrowseCountLine();
   const el=$('#browseList');el.innerHTML='';
   if(!list.length){el.innerHTML=BF.hidedone&&base.length?`<div class="empty">${ic('trophy')}<div>この条件の問題はすべて習得済みです！</div></div>`:'<div class="empty">該当する問題がありません</div>';return;}
-  const byDoc=sortMode()==='doc';
+  const byDoc=sortMode()==='doc'||sortMode()==='docraw';const oc=sortMode()==='doc'?orderChecker():'';
   const ST_LABEL={new:'未着手',learning:'勉強済',mastered:'習得済み'};
   let lastCat=null,lastSt=null;
   list.forEach(q=>{
-    if(byDoc&&q.category!==lastCat){
-      lastCat=q.category;
+    const sk=(oc&&q.checker===oc?oc+' ・ ':'')+q.category;   // チェッカーの問題の区切りは「金森 ・ カテゴリ」
+    if(byDoc&&sk!==lastCat){
+      lastCat=sk;
       const h=document.createElement('div');h.className='cat-sep';
       h.style.setProperty('--cc',catColor(q.category));
-      h.innerHTML=`${ic(catIcon(q.category))}${esc(q.category)}`;
+      h.innerHTML=`${ic(catIcon(q.category))}${esc(sk)}`;
       el.appendChild(h);
     }
     // 状態順のときは状態で区切る（「勉強済を先頭」は 勉強済 / その他 の2ブロック）
@@ -1746,7 +1753,7 @@ if(!ALL.length){
   if(store._src!=='nintei'){store._src='nintei';save();} // 迫田・共通タブ廃止に伴う移行（下田さん一本化）
   $('#backupBtn').innerHTML=ic('download');
   $('#verLine').textContent=META.build?`データ更新: ${META.build}`:'';
-  fillCheckers();
+  fillCheckers();fillSortLabels();
   $('#scopeSel').value=scopeOf();
   $('#sortSel').value=sortMode();
   // デスクトップのみキーボード操作のヒントを表示
