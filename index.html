@@ -237,6 +237,8 @@ a{color:var(--accent)}
 .lapsel i:hover{color:var(--ink)}
 .lapsel i.on{color:var(--accent-ink);background:linear-gradient(135deg,var(--accent),var(--accent-2))}
 .prog-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.prog-line .lapsel{margin-left:0}
+mark.ans-mk{color:inherit;font-weight:800;background:linear-gradient(transparent 48%,rgba(255,205,0,.45) 48%);padding:0 2px;border-radius:2px}
+[data-theme="light"] mark.ans-mk{background:linear-gradient(transparent 48%,rgba(255,205,0,.65) 48%)}
 
 /* ---------- 学習カレンダー ---------- */
 .cal{padding:18px 20px;margin-bottom:18px}
@@ -813,7 +815,7 @@ function hashN(s){let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>
 function catColor(c){return (CATMETA[c]&&CATMETA[c].c)||CATPAL[hashN(c)%CATPAL.length];}
 function catIcon(c){return (CATMETA[c]&&CATMETA[c].i)||'dots';}
 function catBadge(c){return `<span class="badge cat" style="--cc:${catColor(c)}">${ic(catIcon(c))}${esc(c)}</span>`;}
-function formatAnswer(t){return esc(t).replace(/【([^】]+)】/g,'<span class="ans-h">【$1】</span>').replace(/(^|\n)(&lt;(?:[^&\n]|&amp;){1,60}?&gt;)/g,'$1<span class="ans-h">$2</span>').replace(/→/g,'<span class="ans-arrow">→</span>');}
+function formatAnswer(t){return esc(t).replace(/==([^=\n]{1,80}?)==/g,'<mark class="ans-mk">$1</mark>').replace(/【([^】]+)】/g,'<span class="ans-h">【$1】</span>').replace(/(^|\n)(&lt;(?:[^&\n]|&amp;){1,60}?&gt;)/g,'$1<span class="ans-h">$2</span>').replace(/→/g,'<span class="ans-arrow">→</span>');}
 function isFlagged(id){return !!prog(id).flag}
 function toggleFlag(id){const p=prog(id);p.flag=!p.flag;save();return p.flag}
 
