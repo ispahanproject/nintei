@@ -1812,7 +1812,8 @@ async function saveData(json,v){
   return ok;
 }
 async function clearSaved(){try{await gKV('readwrite',s=>s.delete(CK));}catch(e){}try{localStorage.removeItem(CK);localStorage.removeItem(CKF);}catch(e){}}
-function boot(json){const o=JSON.parse(json);window.ATPL_QA=o.qa;window.ATPL_META=o.meta;window.ATPL_COMMON=o.common||[];const g=document.getElementById('gate');if(g)g.remove();window.__startApp();}
+function boot(json){const o=JSON.parse(json);const IM=o.images||{};o.qa.forEach(q=>{if(q.imgs&&q.imgs.length)q.imgs=q.imgs.map(p=>IM[p]||p);}); /* 画像はデータ内に1回だけ持ち、ここで各問題へ割り当てる（旧形式のデータは imgs がそのまま data:URI） */
+  window.ATPL_QA=o.qa;window.ATPL_META=o.meta;window.ATPL_COMMON=o.common||[];const g=document.getElementById('gate');if(g)g.remove();window.__startApp();}
 /* 保存済みデータで起動した時: 裏で manifest の版を照合し、更新されていたら再解錠を促す */
 async function checkDataUpdate(){
   try{
